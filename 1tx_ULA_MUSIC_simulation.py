@@ -50,7 +50,7 @@ if __name__ == '__main__':
 
     # now lets estimate angle of arrival using MVDR
     # for each angle of incidence we will compute the power response of MVDR weights
-    power_spectrum = doa.MUSIC(rxer.ant.vk,rxer.rx_signal,1)
+    power_spectrum = doa.MUSIC(rxer.ant.vk,rxer.rx_signal,Ns=1)
     plt.plot(np.rad2deg(thetas),power_spectrum)
     plt.show()
     print(f'DOA Estimate = {np.rad2deg(thetas[np.argmax(power_spectrum)])}')

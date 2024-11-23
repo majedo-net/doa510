@@ -8,7 +8,7 @@ def awgn(noise_power,Nsamples,Nrows):
     '''
 
     p = 10 ** (noise_power/10) # convert noise power to linear
-    n = np.zeros([Nrows,Nsamples])
+    n = np.zeros([Nrows,Nsamples],dtype=np.complex64)
     for nr in range(Nrows):
         n[nr,:] = p*(np.random.randn(Nsamples) + 1j*np.random.randn(Nsamples))/np.sqrt(2)
     return n
