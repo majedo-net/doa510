@@ -33,3 +33,6 @@ class Receiver:
         theta_i = np.angle(vd)
         theta_idx = (np.abs(thetas-theta_i)).argmin()
         self.rx_signal = self.ant.vk[theta_idx,:].reshape(-1,1) @ transmitter.tx_signal.reshape(1,-1)
+        if channel:
+            self.rx_signal += channel(0.01,self.rx_signal.shape[1],self.rx_signal.shape[0])
+

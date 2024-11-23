@@ -19,3 +19,27 @@ def power_mvdr(vk,sn):
     R = np.cov(sn)
     Rinv = np.linalg.pinv(R)
     return (vk.conj().T @ Rinv @ vk).squeeze()
+
+def MUSIC(vk,sn,Ns):
+    '''
+    MUSIC beamformer
+    vk: array manifold vector
+    sn: received signal
+    Ns: number of signals expected
+    thetas: scan angles
+    '''
+    R = np.cov(sn)
+    w, v = np.linalg.eig(R)
+    eig_val_order = np.argsort(np.abs(w))
+    v = v[:, eig_val_order]
+    V = np.zeros((R.shape[0],R.shape[0]-Ns),dtype=np.complex64)
+    for idx in range(R.shape[0]-Ns):
+        V[:,idx] = v[:,idx]
+    power_spectrum = []
+    for idx in range(vk.shape[0]):
+        vki = vk[idx,:].reshape(-1,1)
+        metric = 1 / (vki.conj().T @ V @ V.conj().T @ vki)
+        metric = np.abs(metric.squeeze())
+        metric = 10*np.log10(metric)
+        power_spectrum.append(metric)
+    return power_spectrum
