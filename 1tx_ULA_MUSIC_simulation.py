@@ -38,19 +38,29 @@ if __name__ == '__main__':
     # check that signals are delayed
     # if you decrease theta0 the delay should get smaller
     # increase theta0 to 90 and delay should be half period
+    plt.figure()
     plt.plot(rxer.rx_signal[0,:].squeeze().real[0:200])
     plt.plot(rxer.rx_signal[1,:].squeeze().real[0:200])
     plt.plot(rxer.rx_signal[2,:].squeeze().real[0:200])
-    plt.show()
-
-    # plotting manifold vector for sanity checks...
-    #plt.plot(np.rad2deg(thetas),np.sum(rxer.ant.vk,1))
+    plt.title(rxed_signals_title)
+    plt.xlabel(rxed_signals_xlabel)
+    plt.ylabel(rxed_signals_ylabel)
+    plt.savefig(rxed_signals_path)
     #plt.show()
 
-
-    # now lets estimate angle of arrival using MVDR
-    # for each angle of incidence we will compute the power response of MVDR weights
-    power_spectrum = doa.MUSIC(rxer.ant.vk,rxer.rx_signal,Ns=1)
-    plt.plot(np.rad2deg(thetas),power_spectrum)
+    # plotting manifold vector for sanity checks...
+    plt.plot(np.rad2deg(thetas),np.sum(rxer.ant.vk,1))
     plt.show()
+
+
+    # now lets estimate angle of arrival using MUSIC
+    # for each angle of incidence we will compute the power response of MUSIC
+    power_spectrum = doa.MUSIC(rxer.ant.vk,rxer.rx_signal,Ns=1)
+    plt.figure()
+    plt.plot(np.rad2deg(thetas),power_spectrum)
+    plt.title(estimate_AOA_title)
+    plt.xlabel(estimate_AOA_xlabel)
+    plt.ylabel(estimate_AOA_ylabel)
+    plt.savefig(estimate_AOA_path)
+    #plt.show()
     print(f'DOA Estimate = {np.rad2deg(thetas[np.argmax(power_spectrum)])}')
