@@ -24,16 +24,22 @@ if __name__ == '__main__':
 
     # transmitter at distance r0 and theta0 look angle with isotropic antenna
     theta0 = np.deg2rad(45)
+    theta1 = np.deg2rad(-10)
     r0 = 20
     pos0 = r0*(np.asarray([np.cos(theta0),np.sin(theta0),0]))
-    txer = transmitter.Transmitter(pos0)
-    txer.ant = antenna.Antenna('iso')
+    pos1 = r0*(np.asarray([np.cos(theta1),np.sin(theta1),0]))
+    txer0 = transmitter.Transmitter(pos0)
+    txer0.ant = antenna.Antenna('iso')
+    txer1 = transmitter.Transmitter(pos1)
+    txer1.ant = antenna.Antenna('iso')
 
     # generate the transmit signal
-    txer.generateTone(f0,Fs,Nsamples=Nsamples)
+    txer0.generateTone(f0,Fs,Nsamples=Nsamples)
+    txer1.generateTone(f0,Fs,Nsamples=Nsamples)
 
-    # receive the signal
-    rxer.receiveSignal(txer,thetas,phis,channel.awgn,noise_power=14)
+    # receive the signal(s)
+    rxer.receiveSignal(txer0,thetas,phis,channel.awgn,noise_power=-15)
+    rxer.receiveSignal(txer1,thetas,phis,channel.awgn,noise_power=-15)
 
     # check that signals are delayed
     # if you decrease theta0 the delay should get smaller
@@ -49,7 +55,7 @@ if __name__ == '__main__':
 
 
     # now lets estimate angle of arrival using MUSIC
-    power_spectrum = doa.MUSIC(rxer.ant.vk,rxer.rx_signal,Ns=1)
+    power_spectrum = doa.MUSIC(rxer.ant.vk,rxer.rx_signal,Ns=2)
     plt.plot(np.rad2deg(thetas),power_spectrum)
     plt.show()
     print(f'DOA Estimate = {np.rad2deg(thetas[np.argmax(power_spectrum)])}')

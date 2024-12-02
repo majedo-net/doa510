@@ -37,8 +37,13 @@ class Antenna:
         '''
         self.d = _d
         self.N = _N
-        self.antennaPositions = np.arange(start=self.d*-self.N/2,stop=self.d*self.N/2,step=self.d)
+        if self.N % 2:
+            self.antennaPositions = np.arange(start=self.d*-(self.N-1)/2,stop=self.d*(self.N)/2,step=self.d)
+        else:
+            self.antennaPositions = np.arange(start=self.d*-(self.N-1)/2,stop=self.d*self.N/2,step=self.d)
         self.antennaPositions = np.vstack([self.antennaPositions,np.zeros_like(self.antennaPositions)])
+        # weights used for hybrid beamforming, initialize as ones
+        self.ws = np.eye(self.N)
 
     def computeVman(self,freq,thetas,phis):
         '''
@@ -58,6 +63,48 @@ class Antenna:
                                                [np.cos(thetas)*np.sin(phis)]])
         self.vk = np.exp(-1j*wavevectors.T@self.antennaPositions)
         self.vk = np.squeeze(self.vk)
+
+    def hybridWeights(self,freq,theta0,phi0,Nsub,subtype='adj'):
+        '''
+        calculate hybrid beamforming weights and output applied to vk
+        
+        Nsub: number of subarrays
+        subtype: adjacent or interleaved subarrays
+        '''
+        if self.N % 2:
+            print('Hybrid beamforming requires even number of elements for equal sized subarrays')
+            raise NotImplementedError
+        wavelength = 3e8 / freq
+        wavenumber = 2*np.pi/wavelength
+        wavevector = -wavenumber*np.asarray([[np.sin(theta0)*np.cos(phi0)],
+                                               [np.cos(theta0)*np.sin(phi0)]])
+        wk = np.diag(np.exp(1j*wavevector.T@self.antennaPositions).squeeze())
+
+        # subarray masking matrix for different subarray types
+        match subtype:
+            case 'adj':
+                '''
+                Construct as a block diagonal matrix:
+                    P = 
+                        [
+                        A 0 ...
+                        0 A ...
+                        ... A_Nsub
+                        ]
+                    where A is (Nsub/Nantenna) x 1 vector of ones
+                '''
+                P = np.kron(np.eye(Nsub),np.ones([1,int(self.N / Nsub)]))
+                self.ws = P @ wk
+
+            case 'interleaved':
+                '''
+                
+                '''
+                P = np.zeros(self.N)
+                P[::Nsub] = 1
+                P = np.vstack([P, np.roll(P,1)])
+                self.ws = P@wk
+
 
 
 
