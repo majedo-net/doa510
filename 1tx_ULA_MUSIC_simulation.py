@@ -42,11 +42,7 @@ if __name__ == '__main__':
     plt.plot(rxer.rx_signal[0,:].squeeze().real[0:200])
     plt.plot(rxer.rx_signal[1,:].squeeze().real[0:200])
     plt.plot(rxer.rx_signal[2,:].squeeze().real[0:200])
-    plt.title(rxed_signals_title)
-    plt.xlabel(rxed_signals_xlabel)
-    plt.ylabel(rxed_signals_ylabel)
-    plt.savefig(rxed_signals_path)
-    #plt.show()
+    plt.show()
 
     # plotting manifold vector for sanity checks...
     plt.plot(np.rad2deg(thetas),np.sum(rxer.ant.vk,1))
@@ -58,9 +54,5 @@ if __name__ == '__main__':
     power_spectrum = doa.MUSIC(rxer.ant.vk,rxer.rx_signal,Ns=1)
     plt.figure()
     plt.plot(np.rad2deg(thetas),power_spectrum)
-    plt.title(estimate_AOA_title)
-    plt.xlabel(estimate_AOA_xlabel)
-    plt.ylabel(estimate_AOA_ylabel)
-    plt.savefig(estimate_AOA_path)
-    #plt.show()
+    plt.show()
     print(f'DOA Estimate = {np.rad2deg(thetas[np.argmax(power_spectrum)])}')
