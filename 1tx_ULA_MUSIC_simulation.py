@@ -38,18 +38,20 @@ if __name__ == '__main__':
     # check that signals are delayed
     # if you decrease theta0 the delay should get smaller
     # increase theta0 to 90 and delay should be half period
+    plt.figure()
     plt.plot(rxer.rx_signal[0,:].squeeze().real[0:200])
     plt.plot(rxer.rx_signal[1,:].squeeze().real[0:200])
     plt.plot(rxer.rx_signal[2,:].squeeze().real[0:200])
     plt.show()
 
     # plotting manifold vector for sanity checks...
-    #plt.plot(np.rad2deg(thetas),np.sum(rxer.ant.vk,1))
-    #plt.show()
+    plt.plot(np.rad2deg(thetas),np.sum(rxer.ant.vk,1))
+    plt.show()
 
 
     # now lets estimate angle of arrival using MUSIC
     power_spectrum = doa.MUSIC(rxer.ant.vk,rxer.rx_signal,Ns=1)
+    plt.figure()
     plt.plot(np.rad2deg(thetas),power_spectrum)
     plt.show()
     print(f'DOA Estimate = {np.rad2deg(thetas[np.argmax(power_spectrum)])}')
