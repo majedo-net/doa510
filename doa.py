@@ -18,7 +18,7 @@ def power_mvdr(vk,sn):
     '''
     R = np.cov(sn)
     Rinv = np.linalg.pinv(R)
-    return (vk.conj().T @ Rinv @ vk).squeeze()
+    return 1/(vk.conj().T @ Rinv @ vk).squeeze()
 
 def MUSIC(vk,sn,Ns):
     '''
