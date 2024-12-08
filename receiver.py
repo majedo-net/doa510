@@ -11,7 +11,7 @@ class Receiver:
         self.a = np.asarray(_a) # initial acceleartion
         self.rx_signal = None
 
-    def receiveSignal(self,transmitter, thetas, phis, channel,**kwargs):
+    def receiveSignal(self,transmitter, thetas, phis, channel,noise_type,**kwargs):
         '''
         receive a signal from the argument transmitter and the response channel
 
@@ -28,7 +28,16 @@ class Receiver:
         else:
             self.rx_signal =  self.ant.ws @ self.ant.vk[theta_idx,:].reshape(-1,1) @ transmitter.tx_signal.reshape(1,-1)
         if channel:
-            self.rx_signal += channel(self.pnoise,self.rx_signal.shape[1],self.rx_signal.shape[0])
+            if noise_type==1:
+                self.rx_signal += channel(self.pnoise,self.rx_signal.shape[1],self.rx_signal.shape[0])
+            if noise_type==2:
+                for i in range(self.rx_signal.shape[0]):
+                    self.rx_signal[i,:] = self.rx_signal[i,:]*channel(100,10,self.rx_signal.shape[1])
+            if noise_type==3:
+                z,n = channel(self.pnoise,1000,100,self.rx_signal.shape[1],self.rx_signal.shape[0])
+                for i in range(self.rx_signal.shape[0]):
+                    self.rx_signal[i,:] = self.rx_signal[i,:]*z
+                self.rx_signal += n
 
     
     def trueAoA(self,transmitter):
