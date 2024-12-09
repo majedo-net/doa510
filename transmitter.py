@@ -21,7 +21,7 @@ class Transmitter:
         t = np.arange(Nsamples)/sample_rate
         self.tx_signal = np.exp(2j * np.pi*freq*t)
         return self.tx_signal
-    
+
     def generateBPSK(self,freq,sample_rate,symb_rate,data):
         '''
         generate and upconvert a BPSK signal

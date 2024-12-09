@@ -25,7 +25,7 @@ class Antenna:
         Single isotropic antenna element
         '''
         # we can know the manifold vector for all frequencies right away for an isotropic element
-        self.vk = 1
+        self.vk = np.array([[1]])
         # store the antenna positions just in case we try to compute vman 
         self.antennaPositions = np.zeros([1,1])
 
@@ -45,6 +45,10 @@ class Antenna:
         # weights used for hybrid beamforming, initialize as ones
         self.ws = np.eye(self.N)
 
+        #debugger
+        # print(f"Antenna initialized with positions: {self.antennaPositions}")
+
+
     def computeVman(self,freq,thetas,phis):
         '''
         calculate the array manifold vector 
@@ -61,50 +65,50 @@ class Antenna:
         wavenumbers = 2*np.pi/wavelengths
         wavevectors = -wavenumbers*np.asarray([[np.sin(thetas)*np.cos(phis)],
                                                [np.cos(thetas)*np.sin(phis)]])
-        self.vk = np.exp(-1j*wavevectors.T@self.antennaPositions)
-        self.vk = np.squeeze(self.vk)
+        self.vk = np.exp(-1j * wavevectors.T @ self.antennaPositions)
+        # Ensure vk is always a 2D array
+        self.vk = self.vk.reshape(len(thetas), -1)
 
-    def hybridWeights(self,freq,theta0,phi0,Nsub,subtype='adj'):
-        '''
-        calculate hybrid beamforming weights and output applied to vk
-        
+    # debugger 
+        # print(f"Antenna initialized with positions: {self.antennaPositions}")
+        # print(f"Antenna manifold vector (vk): {self.vk}")
+
+
+    def hybridWeights(self, freq, theta0, phi0, Nsub, subtype='adj'):
+        """
+        Calculate hybrid beamforming weights and output applied to vk.
+
         Nsub: number of subarrays
         subtype: adjacent or interleaved subarrays
-        '''
+        """
         if self.N % 2:
-            print('Hybrid beamforming requires even number of elements for equal sized subarrays')
-            raise NotImplementedError
+            raise ValueError("Hybrid beamforming requires even number of elements for equal-sized subarrays.")
+    
         wavelength = 3e8 / freq
-        wavenumber = 2*np.pi/wavelength
-        wavevector = -wavenumber*np.asarray([[np.sin(theta0)*np.cos(phi0)],
-                                               [np.cos(theta0)*np.sin(phi0)]])
-        wk = np.diag(np.exp(1j*wavevector.T@self.antennaPositions).squeeze())
+        wavenumber = 2 * np.pi / wavelength
+        wavevector = -wavenumber * np.asarray([[np.sin(theta0) * np.cos(phi0)],
+                                            [np.cos(theta0) * np.sin(phi0)]])
+        wk = np.diag(np.exp(1j * wavevector.T @ self.antennaPositions).squeeze())  # (Nant, Nant)
 
-        # subarray masking matrix for different subarray types
-        match subtype:
-            case 'adj':
-                '''
-                Construct as a block diagonal matrix:
-                    P = 
-                        [
-                        A 0 ...
-                        0 A ...
-                        ... A_Nsub
-                        ]
-                    where A is (Nsub/Nantenna) x 1 vector of ones
-                '''
-                P = np.kron(np.eye(Nsub),np.ones([1,int(self.N / Nsub)]))
-                self.ws = P @ wk
+        # Subarray masking matrix for different subarray types
+        if subtype == 'adj':
+            # Block diagonal matrix (Nsub x Nant)
+            P = np.kron(np.eye(Nsub), np.ones([1, int(self.N / Nsub)]))  # (Nsub, Nant)
+        elif subtype == 'interleaved':
+            # Interleaved subarray mask (Nsub x Nant)
+            P = np.zeros((Nsub, self.N))
+            for i in range(Nsub):
+                P[i, i::Nsub] = 1
+        else:
+            raise ValueError(f"Unknown subarray type: {subtype}")
 
-            case 'interleaved':
-                '''
-                
-                '''
-                P = np.zeros(self.N)
-                P[::Nsub] = 1
-                P = np.vstack([P, np.roll(P,1)])
-                self.ws = P@wk
+        # Ensure consistent dimensions
+        if P.shape[1] != wk.shape[0]:
+            raise ValueError(f"Mismatch between P matrix ({P.shape}) and wk matrix ({wk.shape}) dimensions.")
 
+        # Map subarray weights back to full-array weights
+        # P.T @ P @ wk ensures the output has dimensions matching Nant
+        self.ws = P.T @ np.linalg.pinv(P @ P.T) @ (P @ wk)
 
-
-
+        # Debug print statements for dimensions
+        # print(f"[DEBUG hybridWeights] P shape: {P.shape}, wk shape: {wk.shape}, ws shape: {self.ws.shape}")

@@ -1,503 +1,571 @@
 import numpy as np
 import receiver, transmitter, antenna, doa, channel
 import matplotlib.pyplot as plt
-import scienceplots
 import logging
 import os
-import functools
-import copy
 from datetime import datetime
+from itertools import product
+
 
 logger = logging.getLogger(__name__)
+#plt.style.use(['science', 'ieee'])
 
-# use IEEE plot styles for high quality figures
-# comment this line out and plots will load a bit faster for development work
-plt.style.use(['science','ieee'])
+class Angle():
+    """
+    Implements a class that automatically formats angles in degrees and radians which can be edited as needed
+    """
+    def __init__(self, inp_radians = "NAN", inp_degrees = "NAN"):
+        if inp_radians == "NAN":
+            if inp_degrees == "NAN":
+                raise ValueError("Angle object received no argument for radians or degrees.")
+            
+            else:
+                self.set_degrees(inp_degrees)
 
-# Simulation config to bundle all the associated simulation data and computations together
-class simulation_config:
+        else:
+            if inp_degrees == "NAN":
+                self.set_radians(inp_radians) 
+                
+            else:
+                raise ValueError("Angle object received both an argument for radians and an argument for degrees.")      
+
+    def set_radians(self, inp_radians):
+        self.radians = inp_radians
+        self.degrees = self.radians * (180 / np.pi)          
+
+    def set_degrees(self, inp_degrees):
+        self.degrees = inp_degrees
+        self.radians = self.degrees * (np.pi / 180)        
+
+    def get_radians(self):
+        return self.radians
+
+    def get_degrees(self):
+        return self.degrees
+
+
+
+def calculate_metrics_and_log(true_doa, estimated_doa, method_name, log_file=None, execution_time=None, convergence_epochs=None):
     """
-    Configuration file for a simulation. 
-    Holds all relevant starting settings for a given simulation run.
+    Calculate metrics for a DOA estimation method and optionally log to a file.
+
+    Args:
+        true_doa (list or np.array): True angles of arrival (in degrees).
+        estimated_doa (list or np.array): Estimated angles of arrival (in degrees).
+        method_name (str): Name of the DOA estimation method.
+        log_file (file object): File object to write metrics to (optional).
+        execution_time (float): Time taken to execute the method (in seconds).
+        convergence_epochs (int): Number of epochs required to converge (DBT only).
+
+    Returns:
+        metrics (dict): Dictionary containing the calculated metrics.
     """
-    def __init__(self, *args):
-        options = args[0]
+    # Ensure inputs are numpy arrays for consistency
+    true_doa = np.array(true_doa)
+    estimated_doa = np.array(estimated_doa)
+    
+    # Calculate metrics
+    mae = np.mean(np.abs(true_doa - estimated_doa))  # Mean Absolute Error
+    rmse = np.sqrt(np.mean((true_doa - estimated_doa) ** 2))  # Root Mean Squared Error
+    bias = np.mean(estimated_doa - true_doa)  # Bias
+
+    # Compile metrics into a dictionary
+    metrics = {
+        "Method": method_name,
+        "MAE": mae,  # No unit attached here
+        "RMSE": rmse,  # No unit attached here
+        "Bias": bias,  # No unit attached here
+        "Execution Time": execution_time if execution_time is not None else "N/A",
+    }
+
+    # Add convergence epochs only for DBT
+    if method_name == "DBT" and convergence_epochs is not None:
+        metrics["Convergence Epochs"] = convergence_epochs
+
+    return metrics
+
+
+
+def generate_plots(plot_data, output_folder, doa_method, simulation_index):
+    """
+    Generate and save plots for the specified plot types in the options.
+    Args:
+        plot_data: Dictionary containing additional data for plotting.
+        output_folder: Directory to save the plots.
+        doa_method: String representing the DOA method used.
+        simulation_index: Index of the current simulation (1-based).
+    """
+    if doa_method == "DBT":
+        # Plot transmitter trajectory
+        file_suffix = f"{doa_method}_trajectory_{simulation_index}.png"
+        filepath = os.path.join(output_folder, file_suffix)
+        plt.scatter(plot_data["xs"], plot_data["ys"], label="Transmitter Trajectory")
+        plt.scatter(plot_data["antennaPositions"][1, :], plot_data["antennaPositions"][0, :], label="Receiver Antenna Array")
+        plt.xlabel("X Position")
+        plt.ylabel("Y Position")
+        plt.title("Transmitter Trajectory")
+        plt.legend()
+        plt.savefig(filepath)
+        plt.close()
+
+        # Plot DOA estimation accuracy
+        file_suffix = f"{doa_method}_accuracy_{simulation_index}.png"
+        filepath = os.path.join(output_folder, file_suffix)
+        plt.plot(np.arange(len(plot_data["est_doa"])), plot_data["est_doa"], label="Estimated DOA")
+        plt.plot(np.arange(len(plot_data["true_doa"])), plot_data["true_doa"], label="True DOA")
+        plt.xlabel("Epoch")
+        plt.ylabel("DOA (Degrees)")
+        plt.title("DOA Estimation Accuracy and Convergence")
+        plt.legend()
+        plt.savefig(filepath)
+        plt.close()
+
+    elif doa_method in ["MUSIC", "MVDR"]:
+        # Plot spectrum
+        file_suffix = f"{doa_method}_spectrum_{simulation_index}.png"
+        filepath = os.path.join(output_folder, file_suffix)
+        plt.plot(np.rad2deg(plot_data["thetas"]), plot_data["Spectrum"], label="Spatial Spectrum")
+        plt.axvline(x=(plot_data["true_doa"]), color="red", linestyle="--", label="True DOA")
+        plt.xlabel("Angle (Degrees)")
+        plt.ylabel("Power Spectrum (dB)")
+        plt.title(f"{doa_method} Spatial Spectrum")
+        plt.legend()
+        plt.savefig(filepath)
+        plt.close()
+
+        # Plot DOA accuracy comparison
+        file_suffix = f"{doa_method}_accuracy_{simulation_index}.png"
+        filepath = os.path.join(output_folder, file_suffix)
+        plt.scatter([0], [(plot_data["estimated_doa"])], label="Estimated DOA", color="blue")
+        plt.axhline(y=(plot_data["true_doa"]), color="red", linestyle="--", label="True DOA")
+        plt.xlabel("Simulation Configuration")
+        plt.ylabel("DOA (Degrees)")
+        plt.title(f"{doa_method} DOA Accuracy Comparison")
+        plt.legend()
+        plt.savefig(filepath)
+        plt.close()
+
+        # Plot noise robustness if multiple noise powers are defined
+        if len(plot_data.get("noise_levels", [])) > 1:
+            file_suffix = f"{doa_method}_noise_{simulation_index}.png"
+            filepath = os.path.join(output_folder, file_suffix)
+            plt.plot(plot_data["noise_levels"], plot_data["mae_values"], label="MAE vs Noise Power")
+            plt.xlabel("Noise Power (dB)")
+            plt.ylabel("Mean Absolute Error (Degrees)")
+            plt.title(f"{doa_method} Noise Robustness")
+            plt.legend()
+            plt.savefig(filepath)
+            plt.close()
+            
+        STOP
+
+def log_simulation_details(config, log_path, results=None, sim_index=None, total_sims=None):
+    """
+    Logs the simulation configuration and results to a file.
+    Args:
+        config: SimulationConfig object with simulation settings.
+        log_path: Filepath to save the log.
+        results: Dictionary or details about the results.
+        sim_index: Current simulation index (1-based).
+        total_sims: Total number of simulations.
+    """
+    log_dir = os.path.dirname(log_path)
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+
+    with open(log_path, 'a') as log_file:
+        log_file.write(f"Simulation {sim_index}/{total_sims}\n")
+        log_file.write("=" * 40 + "\n")
+
+
+        log_file.write(f"Simulation run started logging at: {datetime.now()}\n")
+
+               # Log configuration details
+        log_file.write("Configuration:\n")
+        log_file.write(f"  Carrier Frequency (f0): {config.f0} Hz\n")
+        log_file.write(f"  Sampling Frequency (Fs): {config.Fs} Hz\n")
+        log_file.write(f"  Signal Type: {config.tx_signal_type}\n")
+        if config.tx_signal_type == "bpsk":
+            log_file.write(f"  Symbol Rate: {config.options.get('symbol_rate', 'N/A')} Hz\n")
+        log_file.write(f"  Number of Samples: {config.Nsamples}\n")
+        log_file.write(f"  Receiver Antenna Elements: {config.rxer_ant_num}\n")
+        log_file.write(f"  Array Spacing: {config.array_spacing} wavelengths\n")
+        log_file.write(f"  True DOA (theta0): {np.rad2deg(config.theta0):.2f} degrees\n")
+        log_file.write(f"  Transmitter Distance (r0): {config.r0} meters\n")
+        log_file.write(f"  Transmitter Antenna Elements: {config.txer_ant_num}\n")
+        log_file.write(f"  DOA Method: {config.doa_method}\n")
+        log_file.write(f"  Noise Power: {config.pnoise} dB\n")
         
-        self.f0 = options[0]
+        # Log DBT-specific parameters if applicable
+        if config.doa_method == "DBT":
+            log_file.write(f"  Number of Subarrays (Nsubarrays): {config.Nsubarrays}\n")
+            log_file.write(f"  Number of Epochs (Nepochs): {config.Nepochs}\n")
+        
+        log_file.write("\nResults:\n")
+        
+        # Log performance metrics
+        metrics = calculate_metrics_and_log(
+            true_doa=[np.rad2deg(config.theta0)],  # true DOA
+            estimated_doa=[results.get("estimated_doa", 0)],  # estimated DOA
+            method_name=config.doa_method
+        )
+
+        log_file.write(f"  Execution Time: {results.get('Execution Time', 'N/A'):.2f} seconds\n")
+        log_file.write(f"  Mean Absolute Error (MAE): {metrics['MAE']:.2f}\n")
+        log_file.write(f"  Root Mean Squared Error (RMSE): {metrics['RMSE']:.2f} \n")
+        log_file.write(f"  Bias: {metrics['Bias']:.2f} \n")
+        log_file.write(f"  True DOA: {np.rad2deg(config.theta0):.2f}\n")
+        estimated_doa = results.get('estimated_doa', 'N/A')
+        log_file.write(f"  Estimated DOA: {estimated_doa:.2f}\n" if isinstance(estimated_doa, (int, float)) else f"  Estimated DOA: {estimated_doa}\n")
+
+        
+        # Log DBT-specific performance metrics
+        if config.doa_method == "DBT" and "Convergence Epochs" in metrics:
+            log_file.write(f"  Convergence Epochs: {metrics['Convergence Epochs']}\n")
+        
+
+        log_file.write("\n")
+        log_file.write("-" * 40 + "\n")
+
+
+class SimulationConfig:
+    """
+    Configuration file for a simulation.
+    Includes dynamic handling for DBT and static configurations for other methods.
+    """
+    def __init__(self, options): 
+
+        # Store all options
+        self.options = options  
+
+        # DOA method 
+        self.doa_method = options["doa_method"]
+
+        # Store receiver antennae type and amount 
+        self.rxer_ant_type = options["rxer_ant_type"]  
+        self.rxer_ant_num = options["rxer_ant_num"]  
+
+
+        # Store transmitter antennae type and amount 
+        self.txer_ant_type = options["txer_ant_type"] 
+        self.txer_ant_num = options["txer_ant_num"]  
+
+
+        # Carrier frequency and sampling frequency
+        self.f0 = options["f0"]
         self.lambda0 = 3e8 / self.f0
-        self.Fs = options[1] * self.f0
-        self.Nsamples = options[2]
+        self.Fs = options["Fs"]
+        self.Nsamples = options["Nsamples"]
 
-        # vector of scan angles
-        self.thetas = options[3]
-        self.phis = options[4]
-
-        # receiver
-        self.rxer_description = options[5]
-        match self.rxer_description:
-            case "":
-                self.rxer = receiver.Receiver()
-            case _:
-                raise Exception("transmitter type not implemented")
+        # Noise 
+        self.noise = options["noise_power"]
         
-        self.rxer_ant_type = options[6]
-        self.rxer_ant_num = options[7]
-        if self.rxer_ant_type == 'iso':
-            self.rxer.ant = antenna.Antenna('iso')
+        # Array spacing
+        self.array_spacing = options.get("array_spacing", self.lambda0 / 2)
+
+        # Vector of scan angles
+        self.thetas = options["thetas"]
+        self.phis = options["phis"]
+
+        # Receiver configuration
+        self.rxer = receiver.Receiver()
+        self.rxer_ant_type = options["rxer_ant_type"]
+        self.rxer_ant_num = options["rxer_ant_num"]
+        self.rxer.ant = antenna.Antenna(self.rxer_ant_type, d=self.array_spacing, N=self.rxer_ant_num)
+        self.rxer.ant.computeVman(self.f0, self.thetas, self.phis)
+
+        # Signal arrival configuration
+        self.theta0 = options["theta0"]
+        self.r0 = options["r0"]
+        
+        # Signal type selection
+        self.tx_signal_type = options.get("tx_signal_type", "tone")  # default single-tone 
+    
+        # Transmitter configuration
+        self.pos0 = self.r0 * np.asarray([np.cos(self.theta0), np.sin(self.theta0), 0])
+
+        if self.doa_method == "DBT":
+            # For DBT, include velocity (vel0) in the transmitter
+            self.vel0 = options.get("vel0", np.asarray([0.0, 0.0, 0.0]))  # Default to zero velocity
+            self.txer = transmitter.Transmitter(self.pos0, _v=self.vel0)
         else:
-            self.rxer.ant = antenna.Antenna(self.rxer_ant_type,d=self.lambda0/2,N=self.rxer_ant_num)
-        
-        self.rxer.ant.computeVman(self.f0,self.thetas,self.phis)
+            # For other methods, initialize without velocity
+            self.txer = transmitter.Transmitter(self.pos0)
 
-        # signal arrival
-        self.theta0_arr = options[8]
-        self.r0_arr = options[9]
-        self.pos0_arr = self.r0_arr*(np.asarray([np.cos(self.theta0_arr),np.sin(self.theta0_arr),0]))
-        
-        # transmitter
-        self.txer_description = options[10]
-        match self.txer_description:
-            case "":
-                self.txer = transmitter.Transmitter(self.pos0_arr)
-            case _:
-                raise Exception("transmitter type not implemented")
-        
-        self.txer_ant_type = options[11]
-        self.txer_ant_num = options[12]
-        if self.txer_ant_type == 'iso':
-            self.txer.ant = antenna.Antenna('iso')
+        self.txer.ant = antenna.Antenna(options["txer_ant_type"])
+
+        # Generate the transmit signal
+        if self.tx_signal_type == "tone":
+            self.txer.generateTone(self.f0, self.Fs, self.Nsamples)
+        elif self.tx_signal_type == "bpsk":
+            data = 2 * np.random.randint(0, 2, 32) - 1  # Generate 32 binary values
+            symbol_rate = options.get("symbol_rate", 1e6)  
+            self.txer.generateBPSK(self.f0, self.Fs, symbol_rate, data)
         else:
-            self.txer.ant = antenna.Antenna(self.txer_ant_type,d=self.lambda0/2,N=self.txer_ant_num)
+            raise ValueError(f"Unsupported signal type: {self.tx_signal_type}")
 
-        self.aoa_method = options[13]
+        # DOA estimation method
+        self.Ns = options.get("doa_extra", -1) if self.doa_method == "MUSIC" else -1
+        self.pnoise = options.get("noise_power", 0)
 
-        if self.aoa_method == "MUSIC":
-            self.Ns = options[14]
-        else:
-                self.Ns = -1 # not using a method that requires this
+        # DBT-specific variables
+        self.Nepochs = options.get("Nepochs", 100)
+        self.dspace = self.array_spacing
+        self.Nant = options["rxer_ant_num"]
+        self.Nsubarrays = options.get("Nsubarrays", 2)
+        self.Pmax = (self.Nant / self.Nsubarrays) ** 2 * self.Nsamples
 
-        # Acquire remaining derivable info from the info already in the config
-        # generate the transmit signal
-        self.txer.generateTone(self.f0,self.Fs,Nsamples=self.Nsamples)
 
-        # receive the signal
-        self.rxer.receiveSignal(self.txer,self.thetas,self.phis,channel.awgn, noise_power=options[15])        
+    def run_dbt(self):
+        """Run the DBT simulation with iterative updates."""
+        th_guess = 0
+        doa_error = 0
+        est_doa = []
+        true_doa = []
+        xs = []
+        ys = []
 
-        match self.aoa_method:
-            case "MVDR":
-                self.power_spectrum = []
-                for thi in range(self.thetas.size):
-                    self.power_spectrum.append(doa.power_mvdr(self.rxer.ant.vk[thi,:],self.rxer.rx_signal))
-                self.power_spectrum = 10*np.log10(np.real(self.power_spectrum)) # convert to dB
+        for epoch in range(self.Nepochs):
+            # Update transmitter position and receiver weights
+            self.txer.timeStep(1)
+            xs.append(self.txer.x[0])  
+            ys.append(self.txer.x[1]) 
+
+            # Iterate for multiple corrections within each epoch
+            for _ in range(2):  
+
+                # Update hybrid beamforming weights based on current estimate
+                self.rxer.ant.hybridWeights(self.f0, th_guess, 0, Nsub=self.Nsubarrays, subtype='interleaved') 
+            
+                # Ensure rx_signal has the required shape for DBT
+                if self.rxer.rx_signal is None or self.rxer.rx_signal.shape[0] < self.Nsubarrays:
+                    raise ValueError("DBT requires at least two subarrays in rx_signal.")
+
+
+                # Receive signal and compute DBT error
+                self.rxer.receiveSignal(self.txer, self.thetas, self.phis, channel.awgn, noise_power=self.pnoise)
+                doa_error = doa.DBT(self.rxer.rx_signal, self.Pmax, self.dspace / self.lambda0)
                 
-            case "MUSIC":
-                self.power_spectrum = doa.MUSIC(self.rxer.ant.vk,self.rxer.rx_signal,Ns=1)
+                # Update DOA estimate
+                th_guess += doa_error
+                if th_guess > np.pi:
+                    th_guess = -np.pi
+                elif th_guess < -np.pi:
+                    th_guess = +np.pi
+            
+            # Log results for this epoch
+            est_doa.append(float(np.rad2deg(th_guess)))
+            true_doa.append(float(np.rad2deg(self.theta0)))
 
-            case _:
-                raise Exception("Unknown AOA method")
-
-class simulation_config_v2:
-    """
-    Configuration file for a simulation. 
-    Holds all relevant starting settings for a given simulation run.
-    """
-    def __init__(self, config_dict):
-        self.f0             = config_dict["f0"]
-        self.lambda0        = 3e8 / self.f0
-        self.Fs             = config_dict["Fs_f0_mult"] * self.f0
-        self.Nsamples       = config_dict["Nsamples"]
-
+        # Return data needed for plotting
+        plot_data = {
+        "xs": xs,
+        "ys": ys,
+        "est_doa": est_doa,
+        "true_doa": true_doa,
+        "antennaPositions": self.rxer.ant.antennaPositions,
+        }
         
-        self.thetas         = config_dict["thetas"]
-        self.phis           = config_dict["phis"]
+        return plot_data
 
-        # receiver
-        self.rxer_description   = config_dict["rxer_description"]
-        match self.rxer_description:
-            case "":
-                self.rxer = receiver.Receiver()
-            case _:
-                raise Exception("transmitter type not implemented")
-        
-        self.rxer_ant_type      = config_dict["rxer_ant_type"]
-        self.rxer_ant_num       = config_dict["rxer_ant_num"]
-        
-        if self.rxer_ant_type == 'iso':
-            self.rxer.ant = antenna.Antenna('iso')
+    def run(self):
+        """Run the simulation for the selected DOA method."""
+    
+        import time
+
+        # Ensure the receiver gets the signal
+        self.rxer.receiveSignal(
+            transmitter=self.txer,
+            thetas=self.thetas,
+            phis=self.phis,
+            channel=channel.awgn,
+            noise_power=self.pnoise
+        )
+
+         # Start timer for execution time metric 
+        start_time = time.perf_counter()
+
+        # Initialize dictionaries
+        results = {}
+        plot_data = {}  # store additional data needed for plots
+
+            # Perform the DOA estimation
+        if self.doa_method == "DBT":
+            plot_data = self.run_dbt()  # Collect plot data from run_dbt
+            execution_time = time.perf_counter() - start_time
+            estimated_doa = plot_data["est_doa"][-1] if plot_data["est_doa"] else None
+
+            # Save primary results
+            results = {
+                "Execution Time": execution_time,
+                "estimated_doa": estimated_doa,
+            }
+
+        elif self.doa_method in ["MVDR", "MUSIC"]:
+            if self.doa_method == "MVDR":
+                spectrum = [
+                    doa.power_mvdr(self.rxer.ant.vk[thi, :], self.rxer.rx_signal)
+                    for thi in range(self.thetas.size)
+                ]
+            else:  # MUSIC
+                spectrum = doa.MUSIC(self.rxer.ant.vk, self.rxer.rx_signal, Ns=self.Ns)
+
+            execution_time = time.perf_counter() - start_time
+            estimated_doa = np.rad2deg(self.thetas[np.argmax(spectrum)])
+            true_doa = float(np.rad2deg(self.theta0))
+
+            # Save primary results
+            results = {
+                "Spectrum": spectrum,
+                "Execution Time": execution_time,
+            }
+
+            # Save additional data for plots
+            plot_data = {
+                "Spectrum": spectrum,
+                "thetas": self.thetas,
+                "true_doa": true_doa,
+                "estimated_doa": estimated_doa,
+                }
+            
+            # # Compute noise robustness if multiple noise levels exist
+            # if self.testing == 'noise':
+            #     print(f"self.noise: {self.noise}, type: {type(self.noise)}")
+            #     noise_levels = noise_vals
+            #     mae_values = []
+            #     for noise in noise_levels:
+            #         self.pnoise = noise
+            #         self.rxer.receiveSignal(
+            #             transmitter=self.txer,
+            #             thetas=self.thetas,
+            #             phis=self.phis,
+            #             channel=channel.awgn,
+            #             noise_power=self.pnoise
+            #         )
+            #         spectrum = [
+            #             doa.power_mvdr(self.rxer.ant.vk[thi, :], self.rxer.rx_signal)
+            #             for thi in range(self.thetas.size)
+            #         ] if self.doa_method == "MVDR" else doa.MUSIC(self.rxer.ant.vk, self.rxer.rx_signal, Ns=self.Ns)
+            #         estimated_doa = np.rad2deg(self.thetas[np.argmax(spectrum)])
+            #         mae_values.append(np.abs(true_doa - estimated_doa))
+
+            #     # Add robustness data
+            #     plot_data["noise_levels"] = noise_levels
+            #     plot_data["mae_values"] = mae_values
+            # print(f"self.noise: {self.noise}, type: {type(self.noise)}")
         else:
-            self.rxer.ant = antenna.Antenna(self.rxer_ant_type, d=self.lambda0/2, N=self.rxer_ant_num)
-        
-        self.rxer.ant.computeVman(self.f0,self.thetas,self.phis)
+            raise ValueError(f"Unknown DOA method: {self.doa_method}")
 
-        # signal arrival
-        self.theta0_arr = config_dict["theta_arr"]
-        self.r0_arr     = config_dict["r_arr"]
-        self.pos0_arr   = np.nan # TODO fix this by producting the thet0 and r0 arrs according to the formula
-        self.vel0_arr   = config_dict["v_arr"]
-        self.acc0_arr   = config_dict["a_arr"]
+        return results, plot_data  # Return both results and plot data
 
-        # transmitter
-        self.txer_description   = config_dict["rxer_description"]
-        match self.txer_description:
-            case "":
-                self.txer = transmitter.Transmitter(self.pos0_arr)
-            case _:
-                raise Exception("transmitter type not implemented")
-        
-        self.txer_ant_type      = config_dict["txer_ant_type"]
-        self.txer_ant_num       = config_dict["txer_ant_num"]
-        if self.txer_ant_type == 'iso':
-            self.txer.ant = antenna.Antenna('iso')
-        else:
-            self.txer.ant = antenna.Antenna(self.txer_ant_type,d=self.lambda0/2,N=self.txer_ant_num)
-
-        self.aoa_method = config_dict["AoA_method"]
-
-        if self.aoa_method == "MUSIC":
-            self.Ns = config_dict["AoA_MUSIC_extra"]
-        else:
-            self.Ns = -1 # not using a method that requires this
-
-        # Acquire remaining derivable info from the info already in the config
-        # generate the transmit signal
-        self.txer.generateTone(self.f0,self.Fs,Nsamples=self.Nsamples)
-
-        # receive the signal
-        self.rxer.receiveSignal(self.txer,self.thetas,self.phis,channel.awgn, noise_power=config_dict["noise_power"])        
-
-        match self.aoa_method:
-            case "MVDR":
-                self.power_spectrum = []
-                for thi in range(self.thetas.size):
-                    self.power_spectrum.append(doa.power_mvdr(self.rxer.ant.vk[thi,:],self.rxer.rx_signal))
-                self.power_spectrum = 10*np.log10(np.real(self.power_spectrum)) # convert to dB
-                
-            case "MUSIC":
-                self.power_spectrum = doa.MUSIC(self.rxer.ant.vk,self.rxer.rx_signal,Ns=1)
-
-            case _:
-                raise Exception("Unknown AOA method")
-
-
-# Class to hold data to compare across a given metric
-class metric_ensemble:
-    def __init__(self):
-        self.MVDR = []
-        self.MUSIC = []
-        self.DBT = []
-
-# Plotting utility functions
-def get_rxed_signals_plotting(fig_path):
-    title_str = "Received Signals Sampled"
-    xlabel_str = "Sample Number"
-    ylabel_str = "Magnitude"
-    path_str = fig_path + "_rxed_signals.png"
-
-    plot_info_tuple = (title_str, xlabel_str, ylabel_str, path_str)
-
-    return plot_info_tuple
-
-def get_estimate_AoA_plotting(fig_path, AoA_method):
-    title_str = "Estimated Angle of Arrival Using " + AoA_method
-    xlabel_str = "Angle (Degrees)"
-    ylabel_str = "AoA Metric"
-    path_str = fig_path + "_rxed_signals.png"
-
-    plot_info_tuple = (title_str, xlabel_str, ylabel_str, path_str)
-
-    return plot_info_tuple   
-
-def format_fig_to_file(plot_type, fig_trail, AOA_estimator = "not_used", *args):
-    match plot_type:
-        case "rxed_signals":
-            title_str, xlabel_str, ylabel_str, path_str = get_rxed_signals_plotting(fig_trail)
-        
-        case "estimate_AOA":
-            title_str, xlabel_str, ylabel_str, path_str = get_estimate_AoA_plotting(fig_trail, AOA_estimator)
-        
-        case "custom":
-            title_str = args[0]
-            xlabel_str = args[1]
-            ylabel_str = args[2]
-            path_str = "fig_path" + args[3]
-            
-        case _:
-            raise Exception("Invalid plot_type")        
-        
-    plt.title(title_str)
-    plt.xlabel(xlabel_str)
-    plt.ylabel(ylabel_str)
-    plt.savefig(path_str)
-    plt.close()
-
-
-# Logging functions
-def log_config_simulation(config, log_path):
-    logging.basicConfig(filename=log_path, level=logging.INFO)
-    
-    now = datetime.now()
-    logger.info(f"Simulation run started logging at: {now}")
-
-    # Log the parameters of the configuration
-    logger.info(f"Configutation parameters: ")
-    logger.info(f"f0: {config.f0}")
-    logger.info(f"Fs / f0 ratio: {config.Fs / config.f0}")
-    logger.info(f"Nsamples: {config.Nsamples}")
-    
-    # logger.info(f"thetas: {config.thetas}")
-    # logger.info(f"phis: {config.phis}")
-    
-    logger.info(f"Receiver description: {config.rxer_description}")
-    logger.info(f"Receiver antenna type: {config.rxer_ant_type}")
-    logger.info(f"Receiver number of antennas: {config.rxer_ant_num}")
-
-    logger.info(f"Transmitter description: {config.txer_description}")
-    logger.info(f"Transmitter description: {config.txer_ant_type}")
-    logger.info(f"Transmitter description: {config.txer_ant_num}")
-    
-    logger.info(f"AoA Method: {config.aoa_method}")
-    logger.info(f"AoA Ns: {config.Ns}\n")
-    
-
-    # Evaluate metric for the configuration
-    true_aoa = np.rad2deg(config.theta0_arr)
-    estimated_aoa = np.rad2deg(config.thetas[np.argmax(config.power_spectrum)])
-    angle_error_aoa = estimated_aoa - true_aoa
-
-    true_noiseless_power = np.linalg.norm(config.txer.tx_signal)
-    true_noisy_power = np.linalg.norm(config.rxer.rx_signal)
-    estimated_power = np.linalg.norm(config.power_spectrum)
-    l2_normal_error_power = np.linalg.norm(estimated_power - true_noiseless_power)
-    l2_percent_error_power = (l2_normal_error_power / true_noiseless_power) * 100
-
-    logger.info(f"Configutation metrics: ")
-    logger.info(f"AoA Truth = {true_aoa} [Degrees]")
-    logger.info(f"AoA Estimate = {estimated_aoa} [Degrees]")
-    logger.info(f"AoA Angle Error (Estimate - True) = {angle_error_aoa} [Degrees]\n")
-    
-    logger.info(f"True Noiseless Signal Power= {true_noiseless_power}")
-    logger.info(f"True Noisy Signal Power= {true_noisy_power}")
-    logger.info(f"Estimated Signal Power = {estimated_power}")
-    logger.info(f"Power l2 Error (Estimate - True) = {l2_normal_error_power}")
-    logger.info(f"Power l2 Percent Error = {l2_percent_error_power}%\n")
-
-    logger.info("Simulation run log finished.\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n")
-
-
-# Simulation proper functions
-def run_simulation_instance(config_parameters, suppress_plots, output_path, tree_code, aoa_ensemble):
-    # Create the config
-    # simulation config objects automatically perform calculations
-    config = simulation_config(config_parameters)
-
-    # Metrics
-    true_aoa = np.rad2deg(config.theta0_arr)
-    estimated_aoa = np.rad2deg(config.thetas[np.argmax(config.power_spectrum)])
-    angle_error_aoa = estimated_aoa - true_aoa
-    
-    match config.aoa_method:
-        case "MVDR":
-            aoa_ensemble.MVDR.append(angle_error_aoa)
-        case "MUSIC":
-            aoa_ensemble.MUSIC.append(angle_error_aoa)
-        case "DBT":
-            aoa_ensemble.DBT.append(angle_error_aoa)
-
-    # Logging
-    log_file_starter = "simulation_log.txt"
-    log_path = os.path.join(output_path, log_file_starter)
-    log_config_simulation(config=config, log_path=log_path)
-
-    # Plotting if desired
-    if not(suppress_plots):
-        fig_file_starter = "simulation_figures_"
-        fig_path = os.path.join(output_path, fig_file_starter) + tree_code
-
-        plt.figure()
-        plt.plot(config.rxer.rx_signal[0,:].squeeze().real[0:200])
-        plt.plot(config.rxer.rx_signal[1,:].squeeze().real[0:200])
-        plt.plot(config.rxer.rx_signal[2,:].squeeze().real[0:200])
-        format_fig_to_file("rxed_signals", fig_path)
-
-        plt.figure()
-        plt.plot(np.rad2deg(config.thetas),config.power_spectrum)
-        format_fig_to_file("estimate_AOA", fig_path, config.aoa_method)
-    
-    
-def simulate_all_options(hide_plots, output_trail, instantiated_options, tree_code, possible_options, aoa_ensemble):
-    # Base case is that no args were passed in
-    # In such case construct a simulation config and save the results of it
-    if len(possible_options) == 0:
-        simulation_results = run_simulation_instance( tuple(instantiated_options), hide_plots, output_trail, tree_code, aoa_ensemble)
-
-
-    # Recursive case is that args are still left
-    # In such case iterate over all options for the 0th arg and for each iteration instantiate the option and call fn1 again witht he new 'concrete' options and no 1st arg
-    else:
-        option0 = possible_options[0]
-        
-        i1 = 0
-        for iter in option0:
-            i1 += 1
-            
-            tree_string = tree_code + str(i1) # add some sort of different naming scheme
-            concrete_options = instantiated_options + [iter]
-            simulate_all_options(hide_plots, output_trail, concrete_options, tree_string, possible_options[1:], aoa_ensemble)
-
-
-    
-def simulate_all_options_v2(config_lookup, instantiated_dict, hide_plots, output_trail, tree_code, aoa_ensemble):
-    # Base case is that the config lookup is empty
-    # In such case construct a simulation config and save the results of it
-    if len(config_lookup.keys()) == 0:
-        simulation_results = run_simulation_instance_v2( instantiated_dict, hide_plots, output_trail, tree_code, aoa_ensemble)
-
-    # Recursive case is that args are still left
-    # In such case iterate over all options for the 0th arg and for each iteration instantiate the option and call fn1 again witht he new 'concrete' options and no 1st arg
-    else:
-        config_dict = copy.deepcopy(config_lookup)
-        key, value = config_dict.popitem()
-
-        for iter in value:
-            i1 += 1
-            
-            tree_string = tree_code + str(i1) # add some sort of different naming scheme
-            
-            concrete_dict = copy.deepcopy(instantiated_dict)
-            concrete_dict[key] = iter
-            
-            simulate_all_options(hide_plots, output_trail, concrete_dict, tree_string, config_lookup, aoa_ensemble)
-
-
-# Main function finds (and if unfound creates) a stack of simulations to perform
-# It then pops individual simulations off the stack, runs them, and saves their output
-# Can optionally suppress plot output if undesired
-def main(hide_plots = False):
-
-    # Add the paths to the directories involved in simulation output invariant to user's OS
-    cwd = os.getcwd()
-
+def main():
+    # Ensure output directory is created at startup 
     output_folder = "output_files"
-    output_path = os.path.join(cwd, output_folder)
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    # Define simulation options
+    options = {
+    ## Signal characteristics
+    "f0": [0.5e9],  # Carrier frequencies
+    "Fs": [10e9, 20e9],  # Sampling frequencies
+    "Nsamples": [50000],  # Number of samples    
+    "noise_power": [-10, 0],  # Noise power in dB
+    "tx_signal_type": ["tone"],  # Signal types: 'tone' (single-tone), bpsk 
+    "symbol_rate": [100e6],  # Symbol rate for BPSK signal generation
     
-    ## Set up the simulation options and loop through all possible configurations
-    #TODO USE A DICTIONARY INSTEAD OF A LIST OF OPTIONS
-    config_dict = {}
-    
-    # Signal charcteristics
-    config_dict["f0"]               = [0.5e9]
-    config_dict["Fs_f0_mult"]       = [1, 1.5, 2, 10, 40]
-    config_dict["Nsamples"]         = [1e5]
-    config_dict["noise_power"]      = [-10, -3, 0, 3, 10, 13, 20] # dB
+    ## Signal transmission
+    # Transmitter antenna array
+    "txer_ant_type": ["iso"],  # Transmitter antenna type
+    "txer_ant_num": [1],  # Number of transmitters     
 
-    # Angles to scan
-    config_dict["thetas"]           = [np.linspace(-np.pi/2,np.pi/2,501)]
-    config_dict["phis"]             = [np.zeros(1)]
-    
-    # Receiver
-    config_dict["rxer_description"] = [""]
-    config_dict["rxer_ant_type"]    = ['ula']
-    config_dict["rxer_ant_num"]     = [7]
+    # Transmitter positioning relative to receiver antenna
+    "theta0": [np.deg2rad(45)],  # True AoA in radians
+    "r0": [50],  # Transmitter distance from receiver
 
-    # Positioning
-    config_dict["theta_arr"]        = [np.deg2rad(15)]
-    config_dict["r_arr"]            = [20]
-    config_dict["v_arr"]            = [0]
-    config_dict["a_arr"]            = [0]
+    ## Signal reception
+    # Receiver antenna array
+    "rxer_ant_type": ["ula"],  # Receiver antenna type
+    "rxer_ant_num": [4],  # Number of antenna elements
+    "array_spacing": [0.5],  # Array spacing in wavelength units    
 
-    # Transmitter
-    config_dict["txer_description"] = [""]
-    config_dict["txer_ant_type"]    = ['iso']
-    config_dict["txer_ant_num"]     = [-1]
+    # Receiver scanning
+    "thetas": np.linspace(-np.pi / 2, np.pi / 2, 501),  # Fixed range of AoAs
+    "phis": np.zeros(1),  # Fixed azimuth angle - 1D
 
-    # Angle of Arrival Estimator
-    config_dict["AoA_method"]       = ["MVDR", "MUSIC"]
-    config_dict["AoA_MUSIC_extra"]  = [1]
-    #config_dict["AoA_DBT_extra"]    = 
+    ## DOA estimation
+    "doa_method": ["MVDR"],  # DOA estimation methods: DBT, MUSIC, MVDR
+    "doa_extra": [1, 2, 3],  # Valid values must be < rxer_ant_num
+
+    "Nsubarrays": [2, 4],  # Number of subarrays for DBT
+    "Nepochs": [100],  # Number of epochs for DBT 
+    "vel0": [np.asarray([0, -0.2, 0])],  # initial velocity for DBT
+    }
+
+    for key, value in options.items():
+        print(f"Parameter: {key}, Data Type: {type(value)}")
 
 
-    options_f0 = [0.5e9]
-    options_Fs_f0_mult = [1, 1.5, 2, 10, 40] # from hopefully severe aliasing to no aliasing
-    options_Nsamples = [1e5]
+    # DOA method for dynamic file naming
+    doa_method = options["doa_method"][0]  # Assuming a single value for simplicity
+    log_path = os.path.join(output_folder, f"{doa_method}_simulations_log.txt")
 
-    options_thetas = [np.linspace(-np.pi/2,np.pi/2,501)]
-    options_phis = [np.zeros(1)]
-    
-    options_rxer_description = [""]
-    options_rxer_ant_type = ['ula']
-    options_rxer_ant_num  = [7]
+    # Clear or initialize the log file
+    with open(log_path, 'w') as log_file:
+        log_file.write(f"DOA Method: {doa_method}\n")
+        log_file.write(f"Simulation Log started at {datetime.now()}\n\n")
 
-    # signal arrival
-    options_theta0 = [np.deg2rad(15)]
-    options_r0 = [20] # Units?
-    
-    # transmitter
-    options_txer_description = [""]
-    options_txer_ant_type = ['iso']
-    options_txer_ant_num  = [-1] # antenna type is iso and doesnt use this currently
-    
-    options_AoA_method = ["MVDR", "MUSIC"]
-    options_AoA_extra = [1]
+    # Declare parameters to be constant 
+    fixed_params = {k: options[k] for k in ["thetas", "phis"]}
 
-    options_noise_power = [-10, -3, 0, 3, 10, 13, 20] # dB
+    # Declare parameters to vary 
+    dynamic_options = {k: options[k] for k in options if k not in fixed_params}
 
-    options_list = [options_f0, options_Fs_f0_mult, options_Nsamples, 
-                    options_thetas, options_phis, options_rxer_description, 
-                    options_rxer_ant_type, options_rxer_ant_num, 
-                    options_theta0, options_r0, options_txer_description, options_txer_ant_type, 
-                    options_txer_ant_num, options_AoA_method, options_AoA_extra, options_noise_power]
+    # Generate all combinations of dynamic options
+    keys, values = zip(*dynamic_options.items())
+    combinations = [dict(zip(keys, v)) for v in product(*values)]
 
-    aoa_error_data = metric_ensemble()
+    # Add fixed parameters to each configuration - UNCOMMENT AND REMOVE LINE 
+    for config_dict in combinations:
+        config_dict.update(fixed_params)
 
-    simulate_all_options(hide_plots=hide_plots, output_trail=output_path, 
-        instantiated_options=[], tree_code="", possible_options=options_list, aoa_ensemble=aoa_error_data)
+    # Initialize counters for each DOA method
+    simulation_index_by_method = {method: 1 for method in options["doa_method"]}
 
-    aoa_l1_errors   = metric_ensemble()    
-    aoa_l1_errors.MVDR  = np.linalg.norm(aoa_error_data.MVDR, 1)
-    aoa_l1_errors.MUSIC = np.linalg.norm(aoa_error_data.MUSIC, 1)
-    #aoa_l1_errors.DBT   = np.linalg.norm(aoa_error_data.DBT, 1)
-    
-    aoa_l2_errors   = metric_ensemble()
-    aoa_l2_errors.MVDR  = np.linalg.norm(aoa_error_data.MVDR, 2)
-    aoa_l2_errors.MUSIC = np.linalg.norm(aoa_error_data.MUSIC, 2)
-    #aoa_l2_errors.DBT   = np.linalg.norm(aoa_error_data.DBT, 2)
+    # Run simulations for all combinations
+    for config_dict in combinations:
+        config = SimulationConfig(config_dict)
+        doa_method = config.doa_method
 
-    aoa_lINF_errors = metric_ensemble()
-    aoa_lINF_errors.MVDR  = np.linalg.norm(aoa_error_data.MVDR, np.inf)
-    aoa_lINF_errors.MUSIC = np.linalg.norm(aoa_error_data.MUSIC, np.inf)
-    #aoa_lINF_errors.DBT   = np.linalg.norm(aoa_error_data.DBT, np.inf)
+        print(f"Running {doa_method} simulation {simulation_index_by_method[doa_method]} of {len(combinations)}...")
 
-    fig_path = os.path.join(output_path, "AoA_error")
+        # Run the simulation and get results
+        results, plot_data = config.run()
 
-    plt.figure()
-    plt.plot(aoa_error_data.MVDR, label="MVDR")
-    plt.plot(aoa_error_data.MUSIC, label="MUSIC")
-    #plt.plot(aoa_error_data.DBT, label="DBT")
-    plt.title("AoA Error Across Metrics")
-    plt.xlabel("Configuration Count")
-    plt.ylabel("Error (Estimated - True) [Degrees]")
-    plt.legend()
-    plt.savefig(fig_path + "_metrics")
-    plt.close()
+        # Generate and save plots
+        generate_plots(
+            plot_data=plot_data,
+            output_folder=output_folder,
+            doa_method=doa_method,
+            simulation_index=simulation_index_by_method[doa_method],
+        )
 
-    plt.figure()
-    plt.hist(aoa_error_data.MVDR)
-    plt.title("MVDR AOA Error")
-    plt.xlabel("Error (Estimated - True) [Degrees]")
-    plt.ylabel("Count")
-    plt.savefig(fig_path + "_MVDR")
-    plt.close()    
+        # Save log and results
+        log_simulation_details(
+            config=config,
+            log_path=log_path,
+            results=results,
+            sim_index=simulation_index_by_method[doa_method],
+            total_sims=len(combinations)
+        )
 
-    plt.figure()
-    plt.hist(aoa_error_data.MUSIC)
-    plt.title("MUSIC AOA Error")
-    plt.xlabel("Error (Estimated - True) [Degrees]")
-    plt.ylabel("Count")
-    plt.savefig(fig_path + "_MUSIC")
-    plt.close()
+        # Increment the simulation index for this method
+        simulation_index_by_method[doa_method] += 1
 
-# Runs main with adjustable settings when this file is run
+    print("All simulations completed.")
+
+    STOP
+
+
 if __name__ == '__main__':
-    suppress_plots = False
-    
-    main(suppress_plots)
+    main()

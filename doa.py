@@ -28,6 +28,14 @@ def MUSIC(vk,sn,Ns):
     Ns: number of signals expected
     thetas: scan angles
     '''
+
+    # print(f"sn input: {sn}")
+    # print(f"sn shape: {sn.shape if sn is not None else 'None'}")
+
+    if sn is None or not isinstance(sn, np.ndarray):
+        raise ValueError(f"Invalid received signal matrix 'sn': {sn}")
+    # print(f"sn.shape: {sn.shape}")
+
     R = np.cov(sn)
     w, v = np.linalg.eig(R)
     eig_val_order = np.argsort(np.abs(w))
@@ -51,9 +59,14 @@ def DBT(rx,Pmax,d_over_lambda):
     Pmax: maximum power of the cross correlation, depends on Nsamples and antennas per subarray
     d_over_lambda: analog subarray effective spacing divided by wavelength
     '''
-    Rx = np.correlate(rx[0,:],rx[1,:])/Pmax
-    ux = -1*np.angle(Rx)
-    uy = 0 # 1d case to start with
-    doa_theta = np.sign(ux)*np.asin(np.sqrt(ux**2 + uy**2)/(2*np.pi*d_over_lambda))
-    doa_phi = np.atan(uy/ux)
+
+    if rx.shape[0] < 2:
+        raise ValueError("DBT requires at least two subarrays in the received signal.")
+
+
+    Rx = np.correlate(rx[0, :], rx[1, :], mode='valid') / Pmax
+    ux = -1 * np.angle(Rx)
+    uy = 0  # 1D case to start with
+    doa_theta = np.sign(ux) * np.arcsin(np.sqrt(ux**2 + uy**2) / (2 * np.pi * d_over_lambda))
+    doa_phi = np.arctan2(uy, ux)
     return doa_theta.squeeze()
