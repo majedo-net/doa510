@@ -4,9 +4,11 @@ import receiver, transmitter, antenna, doa, channel
 import matplotlib.pyplot as plt
 import scienceplots
 
-# Use IEEE plot styles for high quality figures
-# Comment this line out if needed for faster development
-# plt.style.use(['science', 'ieee'])
+# Use IEEE plot styles for high-quality figures
+plt.style.use(['science', 'ieee'])
+# Ensure TeX rendering is disabled
+if "text.usetex" in plt.rcParams:
+    plt.rcParams['text.usetex'] = False
 
 def save_plot(fig, filename, output_dir="plots"):
     """Saves the figure to the specified directory."""
@@ -45,12 +47,12 @@ if __name__ == '__main__':
             Fs = base_Fs
             dspace = config_value
 
-        # Receiver with uniform linear array antenna
+        # Receiver setup with uniform linear array antenna
         rxer = receiver.Receiver()
         rxer.ant = antenna.Antenna('ula', d=dspace, N=7)
         rxer.ant.computeVman(f0, thetas, phis)
 
-        # Transmitter at distance r0 and theta0 look angle with isotropic antenna
+        # Transmitter setup
         theta0 = np.deg2rad(45)
         r0 = 20
         pos0 = r0 * np.array([np.cos(theta0), np.sin(theta0), 0])
@@ -61,40 +63,27 @@ if __name__ == '__main__':
         txer.generateTone(f0, Fs, Nsamples=Nsamples)
 
         # Receive the signal
-        rxer.receiveSignal(txer, thetas, phis, channel.awgn, noise_power=14)
+        rxer.receiveSignal(txer, thetas, phis, channel.awgn, noise_power=0)
 
-        # Plot received signals for visual inspection
-        fig, ax = plt.subplots()
-        ax.plot(rxer.rx_signal[0, :].squeeze().real[0:200], label='Antenna 1')
-        ax.plot(rxer.rx_signal[1, :].squeeze().real[0:200], label='Antenna 2')
-        ax.plot(rxer.rx_signal[2, :].squeeze().real[0:200], label='Antenna 3')
-        ax.set_title(f"1tx_ULA_MUSIC_aliasing - Received Signals - {config_name}")
-        ax.legend()
-        save_plot(fig, f"1tx_ULA_MUSIC_aliasing_received_signals_{config_name}.png")
-
-        # Plot manifold vector
-        fig, ax = plt.subplots()
-        ax.plot(np.rad2deg(thetas), np.sum(rxer.ant.vk, 1))
-        ax.set_title(f"1tx_ULA_MUSIC_aliasing - Array Manifold Vector - {config_name}")
-        save_plot(fig, f"1tx_ULA_MUSIC_aliasing_manifold_vector_{config_name}.png")
-
-        # Estimate angle of arrival using MUSIC
+        # MUSIC Power Spectrum Calculation
         power_spectrum = doa.MUSIC(rxer.ant.vk, rxer.rx_signal, Ns=1)
+
+        # Plot results
         fig, ax = plt.subplots()
         ax.plot(np.rad2deg(thetas), power_spectrum)
-        ax.set_title(f"1tx_ULA_MUSIC_aliasing - DOA Power Spectrum - {config_name}")
-        ax.set_xlabel("Angle (Degrees)")
-        ax.set_ylabel("Power Spectrum (dB)")
-        save_plot(fig, f"1tx_ULA_MUSIC_aliasing_DOA_power_spectrum_{config_name}.png")
+        ax.set_title(f"1tx_ULA_MUSIC_aliasing - AoA Estimation - {config_name}")
+        ax.set_xlabel("Estimated AoA (theta)")
+        ax.set_ylabel("MUSIC Spectrum (dB)")
+        save_plot(fig, f"1tx_ULA_MUSIC_aliasing_{config_name}.png")
 
         doa_estimate = np.rad2deg(thetas[np.argmax(power_spectrum)])
         true_doa = np.rad2deg(theta0)
         error = np.abs(doa_estimate - true_doa)
 
         results[config_name] = error
-        print(f"{config_name}: DOA Estimate = {doa_estimate}, Error = {error} degrees")
+        print(f"{config_name}: DOA Estimate = {doa_estimate:.2f}, Error = {error:.2f} degrees")
 
-    # Summarize results
+    # Summarize Results
     print("\nObserved DOA Errors:")
     for config, error in results.items():
         print(f"{config}: {error:.2f} degrees")

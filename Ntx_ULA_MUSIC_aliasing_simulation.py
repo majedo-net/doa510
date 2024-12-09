@@ -68,8 +68,8 @@ if __name__ == '__main__':
 
         # Receive the signals
         rxer.rx_signal = None  # Reset for clean signal addition
-        rxer.receiveSignal(txer0, thetas, phis, channel.awgn, noise_power=-15)
-        rxer.receiveSignal(txer1, thetas, phis, channel.awgn, noise_power=-15)
+        rxer.receiveSignal(txer0, thetas, phis, channel.awgn, noise_power=0)
+        rxer.receiveSignal(txer1, thetas, phis, channel.awgn, noise_power=0)
 
         # Plot received signals for visual inspection
         fig, ax = plt.subplots()

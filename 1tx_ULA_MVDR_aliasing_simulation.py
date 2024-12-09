@@ -37,7 +37,7 @@ if __name__ == '__main__':
         "Large dspace": base_dspace * 2
     }
 
-    noise_powers = [-20, -10, 0]  # SNR values in dB
+    noise_powers = [0]  # SNR value set to 0 dB
     results = {}
 
     for config_name, config_value in aliased_configs.items():
@@ -75,9 +75,7 @@ if __name__ == '__main__':
 
         # Plot Results for Current Configuration
         fig, ax = plt.subplots()
-        ax.plot(np.rad2deg(thetas), power_spectrums[0], label=f'SNR = {-1 * noise_powers[0]} dB')
-        ax.plot(np.rad2deg(thetas), power_spectrums[1], label=f'SNR = {-1 * noise_powers[1]} dB')
-        ax.plot(np.rad2deg(thetas), power_spectrums[2], label=f'SNR = {-1 * noise_powers[2]} dB')
+        ax.plot(np.rad2deg(thetas), power_spectrums[0])
         ax.set_title(f"1tx_ULA_MVDR_aliasing - AoA Estimation - {config_name}")
         ax.set_xlabel("Estimated AoA (theta)")
         ax.set_ylabel("MVDR Spectrum (dB)")
