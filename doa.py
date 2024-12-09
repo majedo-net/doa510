@@ -16,7 +16,7 @@ def power_mvdr(vk,sn):
     '''
     MVDR power spectrum trick from pysdr ebook
     '''
-    R = np.cov(sn)
+    R = np.cov(sn)/sn.shape[1]
     Rinv = np.linalg.pinv(R)
     return 1/(vk.conj().T @ Rinv @ vk).squeeze()
 
@@ -28,7 +28,7 @@ def MUSIC(vk,sn,Ns):
     Ns: number of signals expected
     thetas: scan angles
     '''
-    R = np.cov(sn)
+    R = np.cov(sn)/sn.shape[1]
     w, v = np.linalg.eig(R)
     eig_val_order = np.argsort(np.abs(w))
     v = v[:, eig_val_order]
