@@ -85,3 +85,7 @@ class Receiver:
         vd = vd[0] + 1j * vd[1]
         theta_i = np.angle(vd)
         return theta_i
+    
+    def timeStep(self,delta_t):
+        self.x = self.x + delta_t * self.v + 0.5 * np.power(delta_t, 2) * self.a
+        self.v = self.v + delta_t * self.a

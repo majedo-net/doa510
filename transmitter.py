@@ -39,5 +39,7 @@ class Transmitter:
         return self.tx_signal
 
     def timeStep(self,delta_t):
+        self.x = self.x + delta_t * self.v + 0.5 * np.power(delta_t, 2) * self.a
         self.v = self.v + delta_t * self.a
-        self.x = self.x + delta_t * self.v
+        
+        
