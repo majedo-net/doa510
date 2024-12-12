@@ -67,7 +67,7 @@ def generate_individual_run_plots(plot_data, output_folder, doa_method, simulati
     plt.scatter(plot_data["antennaPositions"][1, :], plot_data["antennaPositions"][0, :], label="Receiver Antenna Array")
     plt.xlabel("X Position")
     plt.ylabel("Y Position")
-    plt.title("Transmitter Trajectory")
+    plt.title(f"Transmitter Trajectory for {doa_method}")
     plt.legend()
     plt.savefig(filepath)
     plt.close()
@@ -79,7 +79,7 @@ def generate_individual_run_plots(plot_data, output_folder, doa_method, simulati
     plt.plot(np.arange(len(plot_data["true_doa"])), plot_data["true_doa"], label="True DOA")
     plt.xlabel("Epoch")
     plt.ylabel("DOA (Degrees)")
-    plt.title("DOA Estimation Accuracy and Convergence")
+    plt.title(f"DOA Estimation Accuracy and Convergence for {doa_method}")
     plt.legend()
     plt.savefig(filepath)
     plt.close()
@@ -122,7 +122,8 @@ def generate_statistical_output(aggregated_metrics, output_folder, doa_method, s
         if config.doa_method == "DBT":
             log_file.write(f"  Number of Subarrays (Nsubarrays): {config.Nsubarrays}\n")
             log_file.write(f"  Number of Epochs (Nepochs): {config.Nepochs}\n")
-        
+            log_file.write(f"  Number of Iterations: {config.num_iter}\n")        
+
         log_file.write("\nResults:\n")
             
         for key in aggregated_metrics:
@@ -143,14 +144,12 @@ def generate_statistical_output(aggregated_metrics, output_folder, doa_method, s
         log_file.write("-" * 40 + "\n")        
 
     for key in aggregated_metrics:
-        metric_description = scipy.stats.describe(aggregated_metrics[key])
-
         file_suffix = f"{doa_method}_{simulation_index}_{key}_hist.png"
         filepath = os.path.join(output_folder, file_suffix)
         plt.hist(aggregated_metrics[key])   
         plt.xlabel("Error")
         plt.ylabel("Count")
-        plt.title(f"{key} Histogram Across {num_trials} Trials")
+        plt.title(f"{key} Histogram Across {num_trials} Trials for {doa_method}")
         plt.savefig(filepath)
         plt.close() 
 
@@ -198,7 +197,8 @@ def log_simulation_details(config, log_path, results=None, sim_index=None, total
         if config.doa_method == "DBT":
             log_file.write(f"  Number of Subarrays (Nsubarrays): {config.Nsubarrays}\n")
             log_file.write(f"  Number of Epochs (Nepochs): {config.Nepochs}\n")
-        
+            log_file.write(f"  Number of Iterations: {config.num_iter}\n")     
+            
         log_file.write("\nResults:\n")
         
         # Log performance metrics
@@ -274,7 +274,7 @@ class SimulationConfig:
 
         self.pos0 = self.r0 * np.asarray([np.cos(self.theta0), np.sin(self.theta0), 0])
         self.vel0 = options.get("vel0", np.asarray([0.0, 0.0, 0.0]))  # Default to zero velocity
-        self.acc0 = options.get("vel0", np.asarray([0.0, 0.0, 0.0]))  # Default to zero acceleration
+        self.acc0 = options.get("acc0", np.asarray([0.0, 0.0, 0.0]))  # Default to zero acceleration
         self.txer = transmitter.Transmitter(self.pos0, _v=self.vel0, _a=self.acc0)
 
         self.txer.ant = antenna.Antenna(self.txer_ant_type)
@@ -299,6 +299,7 @@ class SimulationConfig:
         self.Nant = options["rxer_ant_num"]
         self.Nsubarrays = options.get("Nsubarrays", 2)
         self.Pmax = (self.Nant / self.Nsubarrays) ** 2 * self.Nsamples
+        self.num_iter = options.get("num_iter", 1)
 
     def run(self):
         """Run the simulation for the selected DOA method."""
@@ -337,7 +338,7 @@ class SimulationConfig:
 
             if self.doa_method == "DBT":
                 # Iterate for multiple corrections within each epoch <- Why? Is the DBT quick enough to do this?
-                for _ in range(2):  
+                for _ in range(self.num_iter):  
                     # Update hybrid beamforming weights based on current estimate
                     self.rxer.ant.hybridWeights(self.f0, th_guess, 0, Nsub=self.Nsubarrays, subtype='interleaved') 
                 
@@ -407,9 +408,9 @@ def main():
     options = {
     ## Signal characteristics
     "f0": [0.5e9],  # Carrier frequencies
-    "Fs": [10e9, 20e9],  # Sampling frequencies
+    "Fs": [20e9],  # Sampling frequencies
     "Nsamples": [50000],  # Number of samples    
-    "noise_power": [-10, 0],  # Noise power in dB
+    "noise_power": [-10],  # Noise power in dB
     "tx_signal_type": ["tone"],  # Signal types: 'tone' (single-tone), bpsk 
     "symbol_rate": [100e6],  # Symbol rate for BPSK signal generation
     
@@ -421,6 +422,8 @@ def main():
     # Transmitter positioning relative to receiver antenna
     "theta0": [np.deg2rad(45)],  # True AoA in radians
     "r0": [50],  # Transmitter distance from receiver
+    "vel0": [np.asarray([0, -0.2, 0])],  # initial velocity for DBT
+    "acc0": [np.asarray([0, 0, 0])],    
 
     ## Signal reception
     # Receiver antenna array
@@ -441,11 +444,11 @@ def main():
     # DBT exclusive
     "Nsubarrays": [2],#[2, 4],  # Number of subarrays for DBT
     "Nepochs": [100],  # Number of epochs for DBT 
-    "vel0": [np.asarray([0, -0.2, 0])],  # initial velocity for DBT
-    
+    "num_iter": [1, 10],
+
     # Special
-    "num_trials": 1, # This is constant across trials and does not vary
-    "output_stats": False,
+    "num_trials": 30, # This is constant across trials and does not vary
+    "output_stats": True,
     "output_log": True,
     "output_plots": True,
     }
@@ -495,7 +498,6 @@ def main():
 
         # Run simulations for all combinations
         for config_dict in combinations:
-            config = SimulationConfig(config_dict)
 
             print(f"Running {doa_method} simulation {simulation_index_by_method[doa_method]} of {len(combinations)}...")
 
@@ -507,7 +509,8 @@ def main():
             }
 
             for _ in range(options["num_trials"]):
-                # Run the simulation and get results
+                # Generate, run the simulation, and get results
+                config = SimulationConfig(config_dict)
                 results, plot_data = config.run()
 
                 # Log performance metrics
