@@ -53,6 +53,10 @@ def DBT(rx,Pmax,d_over_lambda):
     '''
     Rx = np.correlate(rx[0,:],rx[1,:])/Pmax
     ux = -1*np.angle(Rx)
+    if ux > np.pi/2:
+        ux = ux - np.pi
+    elif ux < -np.pi/2:
+        ux = ux +np.pi
     uy = 0 # 1d case to start with
     doa_theta = np.sign(ux)*np.asin(np.sqrt(ux**2 + uy**2)/(2*np.pi*d_over_lambda))
     doa_phi = np.atan(uy/ux)

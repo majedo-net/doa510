@@ -47,8 +47,8 @@ if __name__ == '__main__':
     # transmitter at distance r0 and theta0 starting position look angle with isotropic antenna
     theta0 = np.deg2rad(60)
     r0 = 20 # meters
-    pos0 = r0*(np.asarray([np.cos(theta0),np.sin(theta0),0]))
-    vel0 = np.asarray([0,-0.2,0])
+    pos0 = r0*(np.array([np.cos(theta0),np.sin(theta0),0]))
+    vel0 = np.array([0,-0.2,0])
     txer = transmitter.Transmitter(pos0,vel0)
     txer.ant = antenna.Antenna('iso')
 
